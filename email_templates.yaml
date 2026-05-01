@@ -1,0 +1,7 @@
+job_application:
+  subject: "Applying for Software Engineering roles"
+  body: "Please consider the resume and cover letter attached."
+  html: false
+  attachments:
+    - ~/Documents/DhimanBarmanResume2025-v3.pdf
+    - ~/Documents/Dhiman_Barman_Cover_Letter.pdf

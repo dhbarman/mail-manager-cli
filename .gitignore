@@ -1,0 +1,5 @@
+delete_history.json
+mails/
+*.pyc
+__pycache__/
+.env
