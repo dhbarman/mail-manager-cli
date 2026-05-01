@@ -3,5 +3,5 @@ job_application:
   body: "Please consider the resume and cover letter attached."
   html: false
   attachments:
-    - ~/Documents/DhimanBarmanResume2025-v3.pdf
-    - ~/Documents/Dhiman_Barman_Cover_Letter.pdf
+    - ~/Documents/Resume.pdf
+    - ~/Documents/CoverLetter.pdf
