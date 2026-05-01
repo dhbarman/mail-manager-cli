@@ -3,5 +3,5 @@ job_application:
   body: "Please consider the resume and cover letter attached."
   html: false
   attachments:
-    - ~/Documents/Resume.pdf
-    - ~/Documents/CoverLetter.pdf
+    - <path/to/resume>
+    - <path/to/cover-letter>
