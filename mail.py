@@ -37,6 +37,7 @@ Usage:
 
 import os
 import sys
+import time
 import imaplib
 import smtplib
 import email
@@ -555,6 +556,7 @@ def bulk_delete(
     dry_run=False,
     parallel=False,
     match_any=False,
+    auto_confirm=False,
 ):
     """
     Delete emails matching filters.
@@ -758,7 +760,11 @@ def bulk_delete(
         print(f"  [history] Dry-run saved to {HISTORY_FILE}")
         return
 
-    confirm = input(f"\n  Delete {len(to_delete)} email(s)? [y/N] ").strip().lower()
+    if auto_confirm:
+        print(f"\n  [--yes] Auto-confirming deletion of {len(to_delete)} email(s).")
+        confirm = "y"
+    else:
+        confirm = input(f"\n  Delete {len(to_delete)} email(s)? [y/N] ").strip().lower()
     if confirm != "y":
         print("  Aborted.")
         mail.logout()
@@ -1042,6 +1048,10 @@ def main():
     ap.add_argument("--history",        action="store_true", help="Show bulk-delete history")
     ap.add_argument("--replay",         metavar="N", type=int, help="Re-run bulk-delete command #N from history")
     ap.add_argument("--export-filters", action="store_true", help="Export history as Yahoo Mail filter instructions")
+    ap.add_argument("--repeat",         action="store_true", help="Re-run bulk-delete on an interval until Ctrl-C")
+    ap.add_argument("--interval",       metavar="SECONDS", type=int, default=300,
+                                        help="Seconds between repeats (default: 300). Requires --repeat.")
+    ap.add_argument("--yes",            action="store_true", help="Auto-confirm deletion (required with --repeat)")
 
     args = ap.parse_args()
 
@@ -1105,18 +1115,38 @@ def main():
             print("Error: --bulk-delete requires at least one filter flag.")
             print("  Options: --from-addr, --subject-has, --body-has, --older-than, --before, --unread-only")
             sys.exit(1)
-        bulk_delete(
-            folder      = args.folder,
-            from_addr   = args.from_addr,
-            subject_has = args.subject_has,
-            body_has    = args.body_has,
-            older_than  = args.older_than,
-            before      = args.before,
-            unread_only = args.unread_only,
-            dry_run     = args.dry_run,
-            parallel    = args.parallel,
-            match_any   = args.match_any,
-        )
+        if args.repeat and not args.yes:
+            print("Error: --repeat requires --yes (auto-confirm) to run unattended.")
+            sys.exit(1)
+
+        run = 0
+        while True:
+            run += 1
+            if args.repeat:
+                print(f"\n{'─'*50}")
+                print(f"  [repeat] run #{run}  —  {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"{'─'*50}")
+            bulk_delete(
+                folder       = args.folder,
+                from_addr    = args.from_addr,
+                subject_has  = args.subject_has,
+                body_has     = args.body_has,
+                older_than   = args.older_than,
+                before       = args.before,
+                unread_only  = args.unread_only,
+                dry_run      = args.dry_run,
+                parallel     = args.parallel,
+                match_any    = args.match_any,
+                auto_confirm = args.yes,
+            )
+            if not args.repeat:
+                break
+            print(f"\n  [repeat] next run in {args.interval}s — Ctrl-C to stop")
+            try:
+                time.sleep(args.interval)
+            except KeyboardInterrupt:
+                print("\n  [repeat] stopped.")
+                break
     else:
         ap.print_help()
 
