@@ -40,6 +40,7 @@ import sys
 import imaplib
 import smtplib
 import email
+import unicodedata
 import json
 import datetime
 import argparse
@@ -73,6 +74,14 @@ TEMPLATES_FILE = os.path.join(os.path.dirname(__file__), "email_templates.yaml")
 # ─────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────
+
+def _strip_invisible(text):
+    """Remove invisible Unicode chars spammers insert to defeat keyword matching."""
+    return ''.join(
+        c for c in text
+        if unicodedata.category(c) not in ('Cf', 'Co', 'Cc')
+    )
+
 
 def _decode_str(value):
     """Decode email header string (handles encoded words)."""
@@ -587,34 +596,77 @@ def bulk_delete(
 
     print(f"\n  Scanning {len(all_uids)} email(s) in '{folder}'...")
 
-    # ── Phase 1: batch-fetch headers only (fast — one round-trip per 500 UIDs) ──
-    CHUNK = 500
+    # ── Phase 1: batch-fetch headers only ──
+    CHUNK   = 50    # smaller chunks — Yahoo IMAP drops large requests silently
+    RETRIES = 3
     header_map = {}   # uid (bytes) → parsed email message (headers only)
 
-    for i in range(0, len(all_uids), CHUNK):
-        chunk      = all_uids[i : i + CHUNK]
-        uid_set    = b",".join(chunk)
-        st, hdata  = mail.uid("fetch", uid_set, "(RFC822.HEADER)")
-        if st != "OK":
-            continue
+    def _parse_chunk_response(hdata):
+        result = {}
         for item in hdata:
             if not isinstance(item, tuple):
                 continue
-            # item[0] looks like b'123 (UID 456 RFC822.HEADER {size}'
-            m = re.search(rb"UID (\d+)", item[0])
+            m = re.search(rb"UID (\d+)", item[0], re.IGNORECASE)
             if not m:
                 continue
-            uid_bytes = m.group(1)
-            msg       = email.message_from_bytes(item[1])
-            header_map[uid_bytes] = msg
+            result[m.group(1)] = email.message_from_bytes(item[1])
+        return result
+
+    def _fetch_header_chunk(chunk):
+        for attempt in range(RETRIES):
+            try:
+                conn    = _connect()
+                conn.select(folder)
+                uid_set = b",".join(chunk)
+                st, hdata = conn.uid("fetch", uid_set, "(RFC822.HEADER)")
+                conn.logout()
+                if st == "OK":
+                    return _parse_chunk_response(hdata)
+            except Exception as e:
+                if attempt == RETRIES - 1:
+                    print(f"  [warn] chunk failed after {RETRIES} attempts: {e}")
+        return {}
+
+    chunks = [all_uids[i: i + CHUNK] for i in range(0, len(all_uids), CHUNK)]
+    print(f"  Fetching headers in {len(chunks)} chunk(s) of {CHUNK}...")
+
+    if parallel and len(chunks) > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        workers = min(8, len(chunks))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(_fetch_header_chunk, c) for c in chunks]
+            for fut in as_completed(futures):
+                header_map.update(fut.result())
+    else:
+        # reuse existing connection — avoids Yahoo throttling new connections
+        for i, chunk in enumerate(chunks, 1):
+            uid_set = b",".join(chunk)
+            st, hdata = mail.uid("fetch", uid_set, "(RFC822.HEADER)")
+            if st != "OK":
+                print(f"  [warn] chunk {i} fetch failed (status={st})")
+                continue
+            result = _parse_chunk_response(hdata)
+            header_map.update(result)
+            print(f"  [{i}/{len(chunks)}] fetched {len(result)}/{len(chunk)} headers", end="\r")
+
+    print()
+    if len(header_map) < len(all_uids):
+        print(f"  [warn] Only fetched {len(header_map)}/{len(all_uids)} headers — some may have been missed")
+
+    # debug: show sample subjects to verify headers parsed correctly
+    if header_map:
+        sample = [_strip_invisible(_decode_str(msg.get("Subject", "(none)"))) for msg in list(header_map.values())[:5]]
+        print(f"  [debug] sample subjects (cleaned): {sample}")
 
     # ── Phase 2: filter by headers + date ──
     candidates = []   # (uid_bytes, summary) that pass header filters
     for uid_bytes, msg in header_map.items():
         summary = _parse_summary(msg, uid_bytes)
 
-        from_match    = from_addr    and any(f.lower() in summary["from"].lower() for f in from_addr)
-        subject_match = subject_has  and any(s.lower() in summary["subject"].lower() for s in subject_has)
+        clean_from    = _strip_invisible(summary["from"].lower())
+        clean_subject = _strip_invisible(summary["subject"].lower())
+        from_match    = from_addr   and any(f.lower() in clean_from    for f in from_addr)
+        subject_match = subject_has and any(s.lower() in clean_subject for s in subject_has)
 
         if match_any:
             # OR: pass if any content filter matches (only consider filters that were specified)
@@ -632,13 +684,13 @@ def bulk_delete(
                 continue
         if cutoff_date:
             try:
-                raw = re.sub(r"\s*\(.*?\)\s*$", "", summary["date"]).strip()
+                raw      = re.sub(r"\s*\(.*?\)\s*$", "", summary["date"]).strip()
                 parsed   = _eutils.parsedate(raw)
                 msg_date = datetime.date(*parsed[:3])
                 if msg_date >= cutoff_date:
                     continue
             except Exception:
-                pass
+                continue  # skip emails with unparseable dates when date filter is active
 
         candidates.append((uid_bytes, summary))
 
@@ -712,10 +764,9 @@ def bulk_delete(
         mail.logout()
         return
 
-    deleted = 0
-    for uid, s in to_delete:
-        mail.uid("store", uid, "+FLAGS", "\\Deleted")
-        deleted += 1
+    uid_set = b",".join(uid for uid, _ in to_delete)
+    mail.uid("store", uid_set, "+FLAGS", "\\Deleted")
+    deleted = len(to_delete)
 
     mail.expunge()
     print(f"\n  [bulk-delete] {deleted} email(s) deleted from '{folder}'.")
