@@ -545,6 +545,88 @@ def replay_history(index):
     os.system(cmd)
 
 
+def list_senders(folder="INBOX", limit=None, sort_by="count"):
+    """Fetch all headers and print unique From addresses with email count."""
+    mail = _connect()
+    _select_folder(mail, folder)
+
+    status, data = mail.uid("search", None, "ALL")
+    if status != "OK":
+        print("[error] Search failed")
+        mail.logout()
+        return
+
+    all_uids = data[0].split()
+    if not all_uids:
+        print("  Mailbox is empty.")
+        mail.logout()
+        return
+
+    print(f"\n  Fetching headers from {len(all_uids)} email(s) in '{folder}'...")
+
+    CHUNK   = 50
+    RETRIES = 3
+
+    def _parse_chunk(hdata):
+        result = {}
+        for item in hdata:
+            if not isinstance(item, tuple):
+                continue
+            m = re.search(rb"UID (\d+)", item[0], re.IGNORECASE)
+            if m:
+                result[m.group(1)] = email.message_from_bytes(item[1])
+        return result
+
+    header_map = {}
+    chunks = [all_uids[i: i + CHUNK] for i in range(0, len(all_uids), CHUNK)]
+    for i, chunk in enumerate(chunks, 1):
+        for attempt in range(RETRIES):
+            uid_set = b",".join(chunk)
+            st, hdata = mail.uid("fetch", uid_set, "(RFC822.HEADER)")
+            if st == "OK":
+                header_map.update(_parse_chunk(hdata))
+                break
+        print(f"  [{i}/{len(chunks)}] fetched {len(header_map)} headers", end="\r")
+
+    mail.logout()
+    print()
+
+    # count emails per sender
+    from collections import Counter
+    import email.utils as _eutils
+
+    counts  = Counter()
+    display = {}   # normalised addr → display string "Name <addr>"
+    for msg in header_map.values():
+        raw  = _decode_str(msg.get("From", ""))
+        name, addr = _eutils.parseaddr(raw)
+        addr = addr.lower().strip()
+        if not addr:
+            addr = raw.strip().lower()
+        counts[addr] += 1
+        if addr not in display:
+            display[addr] = f"{name} <{addr}>" if name else addr
+
+    if not counts:
+        print("  No senders found.")
+        return
+
+    if sort_by == "count":
+        ranked = counts.most_common()
+    else:
+        ranked = sorted(counts.items(), key=lambda x: x[0])
+
+    if limit:
+        ranked = ranked[:limit]
+
+    col = max(len(display[a]) for a, _ in ranked)
+    print(f"\n  {'Sender':<{col}}  Count")
+    print(f"  {'─' * col}  ─────")
+    for addr, cnt in ranked:
+        print(f"  {display[addr]:<{col}}  {cnt}")
+    print(f"\n  {len(counts)} unique sender(s) across {len(all_uids)} email(s).")
+
+
 def bulk_delete(
     folder="INBOX",
     from_addr=None,
@@ -1066,6 +1148,19 @@ def print_examples():
   List saved templates:
     python3 mail.py --list-templates
 
+── SENDERS ─────────────────────────────────────────────────────────
+  List all unique senders (sorted by email count):
+    python3 mail.py --list-senders
+
+  From a specific folder:
+    python3 mail.py --list-senders --folder Spam
+
+  Top 20 senders only:
+    python3 mail.py --list-senders --limit 20
+
+  Sorted alphabetically by address:
+    python3 mail.py --list-senders --sort-by addr
+
 ── DELETE ──────────────────────────────────────────────────────────
   Delete single email by UID:
     python3 mail.py --delete 12345
@@ -1165,6 +1260,9 @@ def main():
     ap.add_argument("--list-templates",action="store_true", help="List all saved email templates")
 
     # bulk-delete flags
+    ap.add_argument("--list-senders", action="store_true", help="List unique From addresses with email count")
+    ap.add_argument("--sort-by",      metavar="FIELD", choices=["count", "addr"], default="count",
+                                      help="Sort --list-senders by 'count' (default) or 'addr'")
     ap.add_argument("--bulk-delete",  action="store_true", help="Bulk delete emails by filter")
     ap.add_argument("--from-addr",    metavar="SENDER", nargs="+", help="Delete emails from these senders (any match, substring)")
     ap.add_argument("--subject-has",  metavar="TEXT", nargs="+", help="Delete emails whose subject contains any of these (OR within)")
@@ -1188,6 +1286,8 @@ def main():
 
     if args.examples:
         print_examples()
+    elif args.list_senders:
+        list_senders(folder=args.folder, limit=args.limit, sort_by=args.sort_by)
     elif args.export_filters:
         export_filters()
     elif args.clear:
