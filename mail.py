@@ -1008,6 +1008,136 @@ def send_email(to, subject, body, attachments=None, html=False, delete_sent=Fals
 # CLI
 # ─────────────────────────────────────────
 
+def print_examples():
+    examples = """
+╔══════════════════════════════════════════════════════════════════╗
+║              mail.py — usage examples                           ║
+╚══════════════════════════════════════════════════════════════════╝
+
+── INBOX ───────────────────────────────────────────────────────────
+  List last 20 emails:
+    python3 mail.py --inbox
+
+  List last 50 emails from a folder:
+    python3 mail.py --inbox --folder Spam --limit 50
+
+  List unread only:
+    python3 mail.py --unread
+
+  List all folders:
+    python3 mail.py --folders
+
+── READ / SEARCH ────────────────────────────────────────────────────
+  Read email by UID:
+    python3 mail.py --read 12345
+
+  Search by sender:
+    python3 mail.py --search "from:boss@company.com"
+
+  Search by subject:
+    python3 mail.py --search "subject:invoice"
+
+  Search by keyword:
+    python3 mail.py --search "meeting"
+
+── SEND ────────────────────────────────────────────────────────────
+  Send a plain text email:
+    python3 mail.py --send --to "alice@example.com" \\
+        --subject "Hello" --body "Hi Alice!"
+
+  Send with attachment:
+    python3 mail.py --send --to "alice@example.com" \\
+        --subject "Report" --body "See attached." \\
+        --attach /path/to/report.pdf
+
+  Send HTML email:
+    python3 mail.py --send --to "alice@example.com" \\
+        --subject "Hello" --body "<h1>Hi!</h1>" --html
+
+  Send using a template:
+    python3 mail.py --send --to "recruiter@company.com" \\
+        --template job_application
+
+  Send using template, override subject:
+    python3 mail.py --send --to "recruiter@company.com" \\
+        --template job_application \\
+        --subject "Application for Senior Engineer role"
+
+  List saved templates:
+    python3 mail.py --list-templates
+
+── DELETE ──────────────────────────────────────────────────────────
+  Delete single email by UID:
+    python3 mail.py --delete 12345
+
+  Clear all sent mail:
+    python3 mail.py --clear sent
+
+  Clear spam folder:
+    python3 mail.py --clear spam
+
+── BULK DELETE ─────────────────────────────────────────────────────
+  Dry-run (preview matches, no deletion):
+    python3 mail.py --bulk-delete --subject-has "promo" --dry-run
+
+  Delete by subject keyword:
+    python3 mail.py --bulk-delete --subject-has "sale offer"
+
+  Delete by multiple subject keywords (OR):
+    python3 mail.py --bulk-delete --subject-has "promo" "sale" "offer"
+
+  Delete by sender:
+    python3 mail.py --bulk-delete --from-addr "noreply@spam.com"
+
+  Delete by sender OR subject (match-any):
+    python3 mail.py --bulk-delete \\
+        --from-addr "noreply@spam.com" --subject-has "promo" \\
+        --match-any
+
+  Delete emails older than 30 days:
+    python3 mail.py --bulk-delete --older-than 30
+
+  Delete emails before a date:
+    python3 mail.py --bulk-delete --before 2024-01-01
+
+  Delete from Spam folder:
+    python3 mail.py --bulk-delete --folder Spam --subject-has "promo"
+
+  Delete unread only:
+    python3 mail.py --bulk-delete --subject-has "promo" --unread-only
+
+  Faster scan with parallel fetch:
+    python3 mail.py --bulk-delete --subject-has "promo" --parallel
+
+  Auto-confirm (no prompt):
+    python3 mail.py --bulk-delete --subject-has "promo" --yes
+
+── REPEAT (scheduled / unattended) ────────────────────────────────
+  Run every 5 minutes until Ctrl-C:
+    python3 mail.py --bulk-delete --subject-has "promo" \\
+        --repeat --yes
+
+  Run every 10 minutes:
+    python3 mail.py --bulk-delete --subject-has "promo" \\
+        --repeat --interval 600 --yes
+
+  Dry-run repeat (monitor matches without deleting):
+    python3 mail.py --bulk-delete --subject-has "promo" \\
+        --repeat --interval 120 --dry-run --yes
+
+── HISTORY ─────────────────────────────────────────────────────────
+  Show past bulk-delete runs:
+    python3 mail.py --history
+
+  Re-run command #3 from history:
+    python3 mail.py --replay 3
+
+  Export history as Yahoo Mail filter rules:
+    python3 mail.py --export-filters
+"""
+    print(examples)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Yahoo Mail manager via IMAP")
     ap.add_argument("--inbox",     action="store_true", help="List inbox")
@@ -1052,10 +1182,13 @@ def main():
     ap.add_argument("--interval",       metavar="SECONDS", type=int, default=300,
                                         help="Seconds between repeats (default: 300). Requires --repeat.")
     ap.add_argument("--yes",            action="store_true", help="Auto-confirm deletion (required with --repeat)")
+    ap.add_argument("--examples",       action="store_true", help="Show usage examples and exit")
 
     args = ap.parse_args()
 
-    if args.export_filters:
+    if args.examples:
+        print_examples()
+    elif args.export_filters:
         export_filters()
     elif args.clear:
         clear_system_folder(args.clear)
