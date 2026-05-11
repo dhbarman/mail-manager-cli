@@ -578,18 +578,38 @@ def list_senders(folder="INBOX", limit=None, sort_by="count", csv_mode=False):
         return result
 
     header_map = {}
-    chunks = [all_uids[i: i + CHUNK] for i in range(0, len(all_uids), CHUNK)]
+    failed     = 0
+    chunks     = [all_uids[i: i + CHUNK] for i in range(0, len(all_uids), CHUNK)]
     for i, chunk in enumerate(chunks, 1):
+        success = False
         for attempt in range(RETRIES):
-            uid_set = b",".join(chunk)
-            st, hdata = mail.uid("fetch", uid_set, "(RFC822.HEADER)")
-            if st == "OK":
-                header_map.update(_parse_chunk(hdata))
+            try:
+                uid_set = b",".join(chunk)
+                st, hdata = mail.uid("fetch", uid_set, "(RFC822.HEADER)")
+                if st == "OK":
+                    header_map.update(_parse_chunk(hdata))
+                    success = True
+                    break
+            except Exception:
+                pass
+            # reconnect and retry
+            try:
+                mail.logout()
+            except Exception:
+                pass
+            try:
+                mail = _connect()
+                _select_folder(mail, folder)
+            except Exception:
                 break
+        if not success:
+            failed += 1
         print(f"  [{i}/{len(chunks)}] fetched {len(header_map)} headers", end="\r")
 
     mail.logout()
     print()
+    if failed:
+        print(f"  [warn] {failed} chunk(s) failed — {len(all_uids) - len(header_map)} headers may be missing")
 
     # count emails per sender
     from collections import Counter
