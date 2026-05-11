@@ -742,16 +742,32 @@ def bulk_delete(
             for fut in as_completed(futures):
                 header_map.update(fut.result())
     else:
-        # reuse existing connection — avoids Yahoo throttling new connections
         for i, chunk in enumerate(chunks, 1):
-            uid_set = b",".join(chunk)
-            st, hdata = mail.uid("fetch", uid_set, "(RFC822.HEADER)")
-            if st != "OK":
-                print(f"  [warn] chunk {i} fetch failed (status={st})")
-                continue
-            result = _parse_chunk_response(hdata)
-            header_map.update(result)
-            print(f"  [{i}/{len(chunks)}] fetched {len(result)}/{len(chunk)} headers", end="\r")
+            success = False
+            for attempt in range(RETRIES):
+                try:
+                    uid_set = b",".join(chunk)
+                    st, hdata = mail.uid("fetch", uid_set, "(RFC822.HEADER)")
+                    if st == "OK":
+                        result = _parse_chunk_response(hdata)
+                        header_map.update(result)
+                        success = True
+                        break
+                except Exception:
+                    pass
+                # reconnect and re-select on failure
+                try:
+                    mail.logout()
+                except Exception:
+                    pass
+                try:
+                    mail = _connect()
+                    _select_folder(mail, folder)
+                except Exception:
+                    break
+            if not success:
+                print(f"  [warn] chunk {i} failed after {RETRIES} attempts — skipping")
+            print(f"  [{i}/{len(chunks)}] fetched {len(header_map)}/{len(all_uids)} headers", end="\r")
 
     print()
     if len(header_map) < len(all_uids):
