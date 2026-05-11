@@ -1,13 +1,15 @@
 # mail-manager-cli
 
-A command-line email manager using IMAP/SMTP. Currently supports Yahoo Mail with plans to extend to Gmail, Outlook, and other providers.
+A command-line email manager using IMAP/SMTP. Currently supports Yahoo Mail with plans to extend to Gmail and other providers.
 
 ## Features
 
 - Read, search, and save emails
 - Send emails with attachments and HTML support
 - Email templates via YAML (reusable subjects, bodies, attachments)
+- List unique senders — tabular with count or comma-separated CSV
 - Bulk delete by sender, subject, body, date — with AND/OR logic
+- Scheduled/unattended bulk delete with `--repeat`
 - Clear Sent, Trash, and Spam folders
 - Delete history with replay support
 - Export bulk-delete criteria as Yahoo Mail filter instructions
@@ -83,6 +85,28 @@ python3 mail.py --send --to "a@b.com" --template job_application --delete-sent
 python3 mail.py --list-templates
 ```
 
+### Senders
+
+```bash
+# Tabular view — email address and count, sorted by most emails
+python3 mail.py --list-senders
+
+# Comma-separated email addresses on one line (CSV)
+python3 mail.py --list-senders --csv
+
+# From a specific folder
+python3 mail.py --list-senders --folder Spam
+
+# Top 20 senders only
+python3 mail.py --list-senders --limit 20
+
+# Top 20, csv
+python3 mail.py --list-senders --limit 20 --csv
+
+# Sorted alphabetically by address
+python3 mail.py --list-senders --sort-by addr
+```
+
 ### Delete
 
 ```bash
@@ -123,6 +147,22 @@ python3 mail.py --bulk-delete --subject-has "Health" --dry-run
 
 # Faster body search using parallel connections
 python3 mail.py --bulk-delete --body-has "unsubscribe" --parallel
+
+# Auto-confirm (no prompt)
+python3 mail.py --bulk-delete --subject-has "promo" --yes
+```
+
+### Repeat (scheduled / unattended)
+
+```bash
+# Run every 5 minutes until Ctrl-C (requires --yes)
+python3 mail.py --bulk-delete --subject-has "promo" --repeat --yes
+
+# Run every 10 minutes
+python3 mail.py --bulk-delete --subject-has "promo" --repeat --interval 600 --yes
+
+# Dry-run repeat — monitor matches without deleting
+python3 mail.py --bulk-delete --subject-has "promo" --repeat --interval 120 --dry-run --yes
 ```
 
 ### History & Filters
@@ -131,6 +171,13 @@ python3 mail.py --bulk-delete --body-has "unsubscribe" --parallel
 python3 mail.py --history                      # show past bulk-delete commands
 python3 mail.py --replay 2                     # re-run command #2 from history
 python3 mail.py --export-filters               # print Yahoo Mail filter instructions
+```
+
+### Help
+
+```bash
+python3 mail.py --examples                     # full usage guide with examples
+python3 mail.py --help                         # argparse flag reference
 ```
 
 ## Email Templates

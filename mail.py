@@ -1149,14 +1149,20 @@ def print_examples():
     python3 mail.py --list-templates
 
 ── SENDERS ─────────────────────────────────────────────────────────
-  List all unique senders (sorted by email count):
+  List all unique senders with email count (tabular):
     python3 mail.py --list-senders
+
+  Comma-separated email addresses on one line:
+    python3 mail.py --list-senders --csv
 
   From a specific folder:
     python3 mail.py --list-senders --folder Spam
 
   Top 20 senders only:
     python3 mail.py --list-senders --limit 20
+
+  Top 20, csv:
+    python3 mail.py --list-senders --limit 20 --csv
 
   Sorted alphabetically by address:
     python3 mail.py --list-senders --sort-by addr
