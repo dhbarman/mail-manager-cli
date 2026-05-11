@@ -545,7 +545,7 @@ def replay_history(index):
     os.system(cmd)
 
 
-def list_senders(folder="INBOX", limit=None, sort_by="count"):
+def list_senders(folder="INBOX", limit=None, sort_by="count", csv_mode=False):
     """Fetch all headers and print unique From addresses with email count."""
     mail = _connect()
     _select_folder(mail, folder)
@@ -595,17 +595,14 @@ def list_senders(folder="INBOX", limit=None, sort_by="count"):
     from collections import Counter
     import email.utils as _eutils
 
-    counts  = Counter()
-    display = {}   # normalised addr → display string "Name <addr>"
+    counts = Counter()
     for msg in header_map.values():
         raw  = _decode_str(msg.get("From", ""))
-        name, addr = _eutils.parseaddr(raw)
+        _, addr = _eutils.parseaddr(raw)
         addr = addr.lower().strip()
         if not addr:
             addr = raw.strip().lower()
         counts[addr] += 1
-        if addr not in display:
-            display[addr] = f"{name} <{addr}>" if name else addr
 
     if not counts:
         print("  No senders found.")
@@ -619,12 +616,15 @@ def list_senders(folder="INBOX", limit=None, sort_by="count"):
     if limit:
         ranked = ranked[:limit]
 
-    col = max(len(display[a]) for a, _ in ranked)
-    print(f"\n  {'Sender':<{col}}  Count")
-    print(f"  {'─' * col}  ─────")
-    for addr, cnt in ranked:
-        print(f"  {display[addr]:<{col}}  {cnt}")
-    print(f"\n  {len(counts)} unique sender(s) across {len(all_uids)} email(s).")
+    if csv_mode:
+        print(", ".join(addr for addr, _ in ranked))
+    else:
+        col = max(len(a) for a, _ in ranked)
+        print(f"\n  {'Sender':<{col}}  Count")
+        print(f"  {'─' * col}  ─────")
+        for addr, cnt in ranked:
+            print(f"  {addr:<{col}}  {cnt}")
+        print(f"\n  {len(counts)} unique sender(s) across {len(all_uids)} email(s).")
 
 
 def bulk_delete(
@@ -1263,6 +1263,7 @@ def main():
     ap.add_argument("--list-senders", action="store_true", help="List unique From addresses with email count")
     ap.add_argument("--sort-by",      metavar="FIELD", choices=["count", "addr"], default="count",
                                       help="Sort --list-senders by 'count' (default) or 'addr'")
+    ap.add_argument("--csv",          action="store_true", help="Output --list-senders as comma-separated email addresses")
     ap.add_argument("--bulk-delete",  action="store_true", help="Bulk delete emails by filter")
     ap.add_argument("--from-addr",    metavar="SENDER", nargs="+", help="Delete emails from these senders (any match, substring)")
     ap.add_argument("--subject-has",  metavar="TEXT", nargs="+", help="Delete emails whose subject contains any of these (OR within)")
@@ -1287,7 +1288,7 @@ def main():
     if args.examples:
         print_examples()
     elif args.list_senders:
-        list_senders(folder=args.folder, limit=args.limit, sort_by=args.sort_by)
+        list_senders(folder=args.folder, limit=args.limit, sort_by=args.sort_by, csv_mode=args.csv)
     elif args.export_filters:
         export_filters()
     elif args.clear:
