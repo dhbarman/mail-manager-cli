@@ -1080,8 +1080,8 @@ def send_email(to, subject, body, attachments=None, html=False, delete_sent=Fals
     for path in (attachments or []):
         path = os.path.expanduser(path)
         if not os.path.isfile(path):
-            print(f"[warn] Attachment not found, skipping: {path}")
-            continue
+            print(f"[error] Attachment not found: {path}")
+            sys.exit(1)
 
         filename  = os.path.basename(path)
         mime_type, _ = mimetypes.guess_type(path)
@@ -1376,6 +1376,20 @@ def main():
         if not body:
             print("Error: no body — provide --body or define it in the template")
             sys.exit(1)
+
+        # Validate all attachment paths before connecting to SMTP
+        missing = [p for p in attachments if not os.path.isfile(os.path.expanduser(p))]
+        if missing:
+            print("Error: the following attachment(s) were not found:")
+            for p in missing:
+                print(f"  ✗ {os.path.expanduser(p)}")
+            sys.exit(1)
+        if attachments:
+            print("Attachments verified:")
+            for p in attachments:
+                full = os.path.expanduser(p)
+                size = os.path.getsize(full)
+                print(f"  ✓ {full}  ({size // 1024 or 1} KB)")
 
         send_email(args.to, subject, body, attachments=attachments or None,
                    html=html, delete_sent=args.delete_sent)
