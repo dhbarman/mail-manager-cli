@@ -202,7 +202,7 @@ def list_inbox(folder="INBOX", limit=20, unread_only=False):
 
     uids  = data[0].split()
     total = len(uids)
-    uids  = uids[-limit:]   # most recent N
+    uids  = uids[-(limit or 20):]   # most recent N
 
     label = "unread" if unread_only else "total"
     print(f"\n  {folder}  |  {total} {label} emails  |  showing last {len(uids)}")
@@ -273,7 +273,7 @@ def search_emails(query, folder="INBOX", limit=20):
 
     uids  = data[0].split()
     total = len(uids)
-    uids  = uids[-limit:]
+    uids  = uids[-(limit or 20):]
 
     print(f"\n  Search: '{query}'  |  {total} results  |  showing last {len(uids)}")
     print(f"\n  {'UID':<8} {'Date':<22} {'From':<30} Subject")
@@ -370,7 +370,7 @@ def delete_email(uid, folder="INBOX"):
     mail.logout()
 
 
-def _build_cmd(folder, from_addr, subject_has, body_has, older_than, before, unread_only, parallel):
+def _build_cmd(folder, from_addr, subject_has, body_has, older_than, before, unread_only, parallel, exclude_addr=None):
     """Reconstruct the shell command from bulk-delete args."""
     parts = ["python3 mail.py --bulk-delete"]
     if folder and folder != "INBOX":
@@ -389,6 +389,8 @@ def _build_cmd(folder, from_addr, subject_has, body_has, older_than, before, unr
         parts.append("--unread-only")
     if parallel:
         parts.append("--parallel")
+    if exclude_addr:
+        parts.append("--exclude-addr " + " ".join(f'"{a}"' for a in exclude_addr))
     return " ".join(parts)
 
 
@@ -545,7 +547,7 @@ def replay_history(index):
     os.system(cmd)
 
 
-def list_senders(folder="INBOX", limit=None, sort_by="count", csv_mode=False):
+def list_senders(folder="INBOX", limit=None, sort_by="count"):
     """Fetch all headers and print unique From addresses with email count."""
     mail = _connect()
     _select_folder(mail, folder)
@@ -636,15 +638,7 @@ def list_senders(folder="INBOX", limit=None, sort_by="count", csv_mode=False):
     if limit:
         ranked = ranked[:limit]
 
-    if csv_mode:
-        print(", ".join(addr for addr, _ in ranked))
-    else:
-        col = max(len(a) for a, _ in ranked)
-        print(f"\n  {'Sender':<{col}}  Count")
-        print(f"  {'─' * col}  ─────")
-        for addr, cnt in ranked:
-            print(f"  {addr:<{col}}  {cnt}")
-        print(f"\n  {len(counts)} unique sender(s) across {len(all_uids)} email(s).")
+    print(" ".join(addr for addr, _ in ranked))
 
 
 def bulk_delete(
@@ -659,18 +653,20 @@ def bulk_delete(
     parallel=False,
     match_any=False,
     auto_confirm=False,
+    exclude_addr=None,
 ):
     """
     Delete emails matching filters.
 
-    from_addr   – list of substrings; email matches if From contains ANY of them
-    subject_has – list of substrings; email matches if Subject contains ANY of them (OR within)
-    body_has    – substring match on plain-text body (case-insensitive)
-    older_than  – integer days; delete emails older than N days from today (always AND)
-    before      – date string "YYYY-MM-DD"; delete emails sent before this date (always AND)
-    unread_only – only delete emails that have not been read (always AND)
-    match_any   – if True, from_addr/subject_has/body_has are OR; default is AND
-    dry_run     – list matches but do not delete
+    from_addr    – list of substrings; email matches if From contains ANY of them
+    subject_has  – list of substrings; email matches if Subject contains ANY of them (OR within)
+    body_has     – substring match on plain-text body (case-insensitive)
+    older_than   – integer days; delete emails older than N days from today (always AND)
+    before       – date string "YYYY-MM-DD"; delete emails sent before this date (always AND)
+    unread_only  – only delete emails that have not been read (always AND)
+    match_any    – if True, from_addr/subject_has/body_has are OR; default is AND
+    dry_run      – list matches but do not delete
+    exclude_addr – list of substrings; skip emails whose From contains any of them (always AND)
     """
     import email.utils as _eutils
 
@@ -802,6 +798,10 @@ def bulk_delete(
                 continue
             if subject_has  and not subject_match:
                 continue
+        if exclude_addr:
+            if any(e.lower() in clean_from for e in exclude_addr):
+                continue
+
         if cutoff_date:
             try:
                 raw      = re.sub(r"\s*\(.*?\)\s*$", "", summary["date"]).strip()
@@ -873,7 +873,7 @@ def bulk_delete(
     if dry_run:
         print("  [dry-run] No emails were deleted.")
         mail.logout()
-        cmd = _build_cmd(folder, from_addr, subject_has, body_has, older_than, before, unread_only, parallel)
+        cmd = _build_cmd(folder, from_addr, subject_has, body_has, older_than, before, unread_only, parallel, exclude_addr)
         _save_history(cmd, len(to_delete), dry_run=True)
         print(f"  [history] Dry-run saved to {HISTORY_FILE}")
         return
@@ -895,7 +895,7 @@ def bulk_delete(
     mail.expunge()
     print(f"\n  [bulk-delete] {deleted} email(s) deleted from '{folder}'.")
     mail.logout()
-    cmd = _build_cmd(folder, from_addr, subject_has, body_has, older_than, before, unread_only, parallel)
+    cmd = _build_cmd(folder, from_addr, subject_has, body_has, older_than, before, unread_only, parallel, exclude_addr)
     _save_history(cmd, deleted, dry_run=False)
     print(f"  [history] Command saved to {HISTORY_FILE}")
 
@@ -1185,20 +1185,14 @@ def print_examples():
     python3 mail.py --list-templates
 
 ── SENDERS ─────────────────────────────────────────────────────────
-  List all unique senders with email count (tabular):
+  List all unique senders (space-separated):
     python3 mail.py --list-senders
-
-  Comma-separated email addresses on one line:
-    python3 mail.py --list-senders --csv
 
   From a specific folder:
     python3 mail.py --list-senders --folder Spam
 
   Top 20 senders only:
     python3 mail.py --list-senders --limit 20
-
-  Top 20, csv:
-    python3 mail.py --list-senders --limit 20 --csv
 
   Sorted alphabetically by address:
     python3 mail.py --list-senders --sort-by addr
@@ -1281,7 +1275,7 @@ def main():
     ap.add_argument("--unread",    action="store_true", help="List unread emails only")
     ap.add_argument("--folders",   action="store_true", help="List all folders")
     ap.add_argument("--folder",    default="INBOX",     help="Folder to use (default: INBOX)")
-    ap.add_argument("--limit",     type=int, default=20,help="Max emails to list (default: 20)")
+    ap.add_argument("--limit",     type=int, default=None, help="Max results to show (default: 20 for --inbox/--search, all for --list-senders)")
     ap.add_argument("--read",      metavar="UID",       help="Read email by UID")
     ap.add_argument("--search",    metavar="QUERY",     help="Search emails (from:X / subject:X / keyword)")
     ap.add_argument("--save",      metavar="UID",       help="Save email to mails/ directory")
@@ -1305,9 +1299,9 @@ def main():
     ap.add_argument("--list-senders", action="store_true", help="List unique From addresses with email count")
     ap.add_argument("--sort-by",      metavar="FIELD", choices=["count", "addr"], default="count",
                                       help="Sort --list-senders by 'count' (default) or 'addr'")
-    ap.add_argument("--csv",          action="store_true", help="Output --list-senders as comma-separated email addresses")
     ap.add_argument("--bulk-delete",  action="store_true", help="Bulk delete emails by filter")
-    ap.add_argument("--from-addr",    metavar="SENDER", nargs="+", help="Delete emails from these senders (any match, substring)")
+    ap.add_argument("--from-addr",     metavar="SENDER", nargs="+", help="Delete emails from these senders (any match, substring)")
+    ap.add_argument("--exclude-addr",  metavar="SENDER", nargs="+", help="Skip emails whose From contains any of these (applied after all other filters)")
     ap.add_argument("--subject-has",  metavar="TEXT", nargs="+", help="Delete emails whose subject contains any of these (OR within)")
     ap.add_argument("--body-has",     metavar="TEXT",      help="Delete emails whose body contains TEXT")
     ap.add_argument("--older-than",   metavar="DAYS",      type=int, help="Delete emails older than N days")
@@ -1330,7 +1324,7 @@ def main():
     if args.examples:
         print_examples()
     elif args.list_senders:
-        list_senders(folder=args.folder, limit=args.limit, sort_by=args.sort_by, csv_mode=args.csv)
+        list_senders(folder=args.folder, limit=args.limit, sort_by=args.sort_by)
     elif args.export_filters:
         export_filters()
     elif args.clear:
@@ -1403,17 +1397,18 @@ def main():
                 print(f"  [repeat] run #{run}  —  {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 print(f"{'─'*50}")
             bulk_delete(
-                folder       = args.folder,
-                from_addr    = args.from_addr,
-                subject_has  = args.subject_has,
-                body_has     = args.body_has,
-                older_than   = args.older_than,
-                before       = args.before,
-                unread_only  = args.unread_only,
-                dry_run      = args.dry_run,
-                parallel     = args.parallel,
-                match_any    = args.match_any,
-                auto_confirm = args.yes,
+                folder        = args.folder,
+                from_addr     = args.from_addr,
+                subject_has   = args.subject_has,
+                body_has      = args.body_has,
+                older_than    = args.older_than,
+                before        = args.before,
+                unread_only   = args.unread_only,
+                dry_run       = args.dry_run,
+                parallel      = args.parallel,
+                match_any     = args.match_any,
+                auto_confirm  = args.yes,
+                exclude_addr  = args.exclude_addr,
             )
             if not args.repeat:
                 break
